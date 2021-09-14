@@ -394,6 +394,10 @@ defmodule Lapin.Connection do
          :ok <- Channel.close(config_channel) do
       Process.monitor(connection.pid)
 
+      # Monitor all producer and consumer channels in case they exit for any reason
+      (consumers ++ producers)
+      |> Enum.each(fn %{channel: channel} -> Process.monitor(channel.pid) end)
+
       {:ok,
        %{
          state
@@ -493,7 +497,9 @@ defmodule Lapin.Connection do
         params = Enum.join(missing_params, ", ")
 
         error =
-          "Error creating connection #{inspect(configuration)}: missing mandatory params: #{params}"
+          "Error creating connection #{inspect(configuration)}: missing mandatory params: #{
+            params
+          }"
 
         Logger.error(error)
         {:error, error}
