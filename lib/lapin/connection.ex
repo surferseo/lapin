@@ -358,7 +358,6 @@ defmodule Lapin.Connection do
 
     with configuration <- Keyword.merge(@connection_default_params, configuration),
          {:ok, connection} <- AMQP.Connection.open(configuration),
-         _ref = Process.monitor(connection.pid),
          {:ok, config_channel} <- AMQP.Channel.open(connection),
          {:ok, exchanges} <- declare_exchanges(configuration, config_channel),
          {:ok, queues} <- declare_queues(configuration, config_channel),
@@ -366,7 +365,8 @@ defmodule Lapin.Connection do
          :ok <- bind_queues(queues, config_channel),
          {:ok, producers} <- create_producers(configuration, connection),
          {:ok, consumers} <- create_consumers(configuration, connection),
-         :ok <- AMQP.Channel.close(config_channel) do
+         :ok <- AMQP.Channel.close(config_channel),
+         :ok <- monitor_processes(connection, producers, consumers) do
       {
         :next_state,
         :connected,
@@ -611,5 +611,19 @@ defmodule Lapin.Connection do
     else
       {:error, :missing_params, Enum.reject(params, &Keyword.has_key?(configuration, &1))}
     end
+  end
+
+  defp monitor_processes(connection, producers, consumers) do
+    Process.monitor(connection.pid)
+
+    Enum.each(producers, fn producer ->
+      Process.monitor(producer.channel.pid)
+    end)
+
+    Enum.each(consumers, fn consumer ->
+      Process.monitor(consumer.channel.pid)
+    end)
+
+    :ok
   end
 end
