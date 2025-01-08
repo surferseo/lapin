@@ -430,6 +430,16 @@ defmodule Lapin.Connection do
             Logger.debug("Failed rejecting message #{delivery_tag}: #{inspect(reason)}")
         end
     end
+  catch
+    :exit, reason ->
+      case Consumer.reject_message(consumer, delivery_tag, not redelivered) do
+        :ok ->
+          Logger.error("Rejected message #{delivery_tag} due to process exit: #{inspect(reason)}")
+          :ok
+
+        {:error, reject_error} ->
+          Logger.debug("Failed rejecting message #{delivery_tag}: #{inspect(reject_error)}")
+      end
   rescue
     exception ->
       case Consumer.reject_message(consumer, delivery_tag, not redelivered) do
