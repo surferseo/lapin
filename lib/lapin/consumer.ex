@@ -84,7 +84,7 @@ defmodule Lapin.Consumer do
   @doc """
   Creates a consumer from configuration
   """
-  @spec create(Connection.t(), config) :: t
+  @spec create(Connection.t(), config) :: t | {:error, term}
   def create(connection, config) do
     pattern = Keyword.get(config, :pattern, Lapin.Consumer.Config)
     consumer = %__MODULE__{config: config, pattern: pattern}
@@ -97,7 +97,7 @@ defmodule Lapin.Consumer do
       %{consumer | consumer_tag: consumer_tag, queue: queue}
     else
       {:error, error} ->
-        Logger.error("Error creating consumer from config #{config}: #{inspect(error)}")
+        Logger.error("Error creating consumer from config #{inspect(config)}: #{inspect(error)}")
         consumer
     end
   end

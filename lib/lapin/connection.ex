@@ -317,8 +317,62 @@ defmodule Lapin.Connection do
   end
 
   @impl :gen_statem
-  def handle_event(:info, {:DOWN, _, :process, _pid, _reason}, :connected, _data) do
-    Logger.warning("Connection down, reconnecting...")
+  def handle_event(
+        :info,
+        {:DOWN, _, :process, pid, _reason},
+        :connected,
+        %{
+          consumers: consumers,
+          producers: producers,
+          connection: connection
+        } = data
+      ) do
+    [consumers, producers]
+    |> Enum.map(&find_monitored_handler(pid, &1))
+    |> case do
+      [nil, nil] ->
+        Logger.warning("Connection down, reconnecting...")
+        {:stop, :normal}
+
+      [index, nil] ->
+        {%Lapin.Consumer{} = consumer, consumers} = List.pop_at(consumers, index)
+
+        Logger.warning("Consumer down: #{inspect(consumer)}")
+
+        case reconnect_consumer(consumer, connection) do
+          {:ok, consumer} ->
+            Logger.info("Reconnected consumer: #{inspect(consumer)}")
+
+            {:keep_state, Map.put(data, :consumers, [consumer | consumers])}
+
+          {:error, error} ->
+            Logger.error("Error reconnecting consumer: #{inspect(error)}")
+
+            {:stop, :normal}
+        end
+
+      [nil, index] ->
+        {%Lapin.Producer{} = producer, producers} = List.pop_at(producers, index)
+
+        Logger.warning("Producer down: #{inspect(producer)}")
+
+        case reconnect_producer(producer, connection) do
+          {:ok, producer} ->
+            Logger.info("Reconnected producer: #{inspect(producer)}")
+
+            {:kepp_state, Map.put(data, :producers, [producer | producers])}
+
+          {:error, error} ->
+            Logger.info("Error reconnecting producer: #{inspect(error)}")
+
+            {:stop, :normal}
+        end
+    end
+  end
+
+  @impl :gen_statem
+  def handle_event(:info, {:DOWN, _, :process, _pid, _reason}, :disconnected, _data) do
+    Logger.warning("Unknown process down. Reconnecting...")
     {:stop, :normal}
   end
 
@@ -375,7 +429,8 @@ defmodule Lapin.Connection do
           | module: module,
             producers: producers,
             consumers: consumers,
-            connection: connection
+            connection: connection,
+            configuration: configuration
         }
       }
     else
@@ -635,5 +690,36 @@ defmodule Lapin.Connection do
     end)
 
     :ok
+  end
+
+  defp find_monitored_handler(pid, handlers) do
+    Enum.find_index(handlers, &(&1.channel.pid == pid))
+  end
+
+  defp reconnect_consumer(%Lapin.Consumer{config: config}, connection) do
+    case Consumer.create(connection, config) do
+      %Lapin.Consumer{channel: channel} = consumer when not is_nil(channel) ->
+        Process.monitor(channel.pid)
+
+        {:ok, consumer}
+
+      %Lapin.Consumer{} ->
+        {:error, :closing}
+
+      err ->
+        err
+    end
+  end
+
+  defp reconnect_producer(%Lapin.Producer{config: config}, connection) do
+    case Producer.create(connection, config) do
+      %Lapin.Producer{} = producer ->
+        Process.monitor(producer.channel.pid)
+
+        {:ok, producer}
+
+      err ->
+        err
+    end
   end
 end
